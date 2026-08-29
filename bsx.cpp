@@ -58,6 +58,25 @@ static const uint8	flashcard[20] =
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
 
+/* Is an 8M Memory Pack actually in the cartridge's slot?
+ *
+ * The BS-X finds out the way anything finds out about a flash chip: it issues
+ * command 0x75 (Show Page Buffer / Vendor Info) and reads the manufacturer and
+ * device id back from $FF00-$FF12. An empty slot has no chip to answer, so the
+ * shell concludes there is no pack and says so itself.
+ *
+ * snes9x answered that query unconditionally, which is why the emulated BS-X
+ * always believed a pack was present: it would happily download into a flash
+ * nothing was backing, and the data went nowhere. Defaults to TRUE so a frontend
+ * that never calls the setter behaves exactly as before.
+ */
+static bool8	BSX_pack_present = TRUE;
+
+void S9xSetBSXPackPresent (bool8 present)
+{
+	BSX_pack_present = present;
+}
+
 #if 0
 static const uint8	init2192[32] =	// FIXME
 {
@@ -584,8 +603,10 @@ uint8 S9xGetBSX (uint32 address)
 		case 0xFF0E:
 		case 0xFF10:
 		case 0xFF12:
-			// return flash vendor information
-			if (BSX.read_enable)
+			// return flash vendor information, if there is a chip to answer.
+			// With no pack in the slot the bus is left as it was found, which is
+			// how the BS-X learns the slot is empty.
+			if (BSX.read_enable && BSX_pack_present)
 				t = flashcard[offset - 0xFF00];
 			break;
 	}

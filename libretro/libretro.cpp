@@ -1209,6 +1209,15 @@ bool retro_load_game(const struct retro_game_info *game)
     if (!rom_loaded && log_cb)
         log_cb(RETRO_LOG_ERROR, "ROM loading failed...\n");
 
+    /* Whether the cartridge has a pack in its slot is exactly whether the
+     * content we were given IS the shell: BSXItself means the BS-X BIOS was
+     * loaded on its own, with no pack image behind it. A .bs as content, or the
+     * shell paired with one through the bsx subsystem, both mean a pack. Told
+     * this, the BS-X detects the empty slot itself rather than downloading into
+     * a flash nothing is backing. */
+    if (Settings.BS)
+        S9xSetBSXPackPresent(!Settings.BSXItself);
+
     Memory.ClearSRAM();
 
     return rom_loaded;
@@ -1350,6 +1359,15 @@ bool retro_load_game_special(unsigned game_type, const struct retro_game_info *i
 
         g_geometry_update = true;
     }
+
+    /* Whether the cartridge has a pack in its slot is exactly whether the
+     * content we were given IS the shell: BSXItself means the BS-X BIOS was
+     * loaded on its own, with no pack image behind it. A .bs as content, or the
+     * shell paired with one through the bsx subsystem, both mean a pack. Told
+     * this, the BS-X detects the empty slot itself rather than downloading into
+     * a flash nothing is backing. */
+    if (Settings.BS)
+        S9xSetBSXPackPresent(!Settings.BSXItself);
 
     return rom_loaded;
 }
