@@ -1113,10 +1113,6 @@ static bool8 is_SufamiTurbo_Cart (const uint8 *data, uint32 size)
         return (FALSE);
 }
 
-static void bsx_pack_load(void);
-static void bsx_pack_save(void);
-static bool bsx_pack_pending = false;
-
 bool retro_load_game(const struct retro_game_info *game)
 {
     init_descriptors();
@@ -1165,10 +1161,6 @@ bool retro_load_game(const struct retro_game_info *game)
         }
 
         g_geometry_update = true;
-
-        /* The BS-X shell arrives here (single content), not through
-         * retro_load_game_special. Deferred to the first frame; see retro_run. */
-        bsx_pack_pending = true;
 
         if (randomize_memory)
         {
@@ -1321,60 +1313,15 @@ bool retro_load_game_special(unsigned game_type, const struct retro_game_info *i
         }
 
         g_geometry_update = true;
-
-        /* Deferred to the first frame; see retro_run. */
-        bsx_pack_pending = true;
     }
 
     return rom_loaded;
 }
 
 
-/* --- BS-X memory pack persistence -------------------------------------------
- * A programme downloaded from the satellite lands in the 8M Memory Pack, which
- * is FlashROM (== Memory.ROM). Nothing else preserves it: it is in no savestate
- * (snapshot.cpp freezes only the BSX register struct) and, before the PRAM case
- * above, in no memory region either -- so every download died with the process.
- *
- * Scoped to the BS-X shell booted on its own. When a .bs pack is loaded as
- * content the file IS the pack and is the frontend's to write; restoring over it
- * here would silently replace the medium the player inserted.
- * ---------------------------------------------------------------------------*/
-static void bsx_pack_path(char *out, size_t n)
-{
-    snprintf(out, n, "%s%cBS-X.pack", retro_save_directory,
-             retro_save_directory[0] ? '/' : '.');
-}
-
-static void bsx_pack_load(void)
-{
-    char path[4096];
-    FILE *fp;
-    bsx_pack_path(path, sizeof(path));
-    fp = fopen(path, "rb");
-    if (!fp)
-        return;
-    size_t got = fread(Memory.ROM, 1, 0x100000, fp);
-    fclose(fp);
-}
-
-static void bsx_pack_save(void)
-{
-    char path[4096];
-    FILE *fp;
-    bsx_pack_path(path, sizeof(path));
-    fp = fopen(path, "wb");
-    if (!fp)
-        return;
-    fwrite(Memory.ROM, 1, 0x100000, fp);
-    fclose(fp);
-}
 
 void retro_unload_game(void)
-{
-    if (Settings.BS && Settings.BSXItself)
-        bsx_pack_save();
-}
+{}
 
 static void map_buttons();
 
@@ -1901,16 +1848,6 @@ void retro_run()
 {
     static uint16 height = PPU.ScreenHeight;
     bool updated = false;
-
-    /* Restore the memory pack on the first frame, not at load: LoadROMMem ends in
-     * S9xReset (memmap.cpp:1558/1719), whose S9xResetBSX erases the pack, so a
-     * restore done inside retro_load_game is wiped before a frame ever runs. */
-    if (bsx_pack_pending)
-    {
-        bsx_pack_pending = false;
-        if (Settings.BS && Settings.BSXItself)
-            bsx_pack_load();
-    }
 
     if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &updated) && updated)
         update_variables();
