@@ -52,6 +52,7 @@ uint8 S9xGetBSXPPU (uint16);
 void S9xSetBSXPPU (uint8, uint16);
 uint8 * S9xGetBasePointerBSX (uint32);
 void S9xInitBSX (void);
+void S9xSetBSXSuppliedBIOS (const uint8 *rom, size_t size);
 void S9xResetBSX (void);
 void S9xBSXPostLoadState (void);
 

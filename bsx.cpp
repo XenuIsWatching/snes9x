@@ -1201,6 +1201,19 @@ uint8 * S9xGetBasePointerBSX (uint32 address)
 	return (MapROM);
 }
 
+/* A BS-X shell handed over by the frontend for this load, or NULL to use the
+ * BS-X.bin sitting in the BIOS directory. Owned by the caller and only valid for
+ * the duration of the load -- see retro_load_game_special. */
+static const uint8	*BSX_supplied_bios = NULL;
+static size_t		BSX_supplied_size = 0;
+
+void S9xSetBSXSuppliedBIOS (const uint8 *rom, size_t size)
+{
+	BSX_supplied_bios = rom;
+	BSX_supplied_size = size;
+}
+
+
 static bool8 BSX_LoadBIOS (void)
 {
 	FILE	*fp;
@@ -1300,7 +1313,16 @@ void S9xInitBSX (void)
 
 			BSX.bootup = Settings.BSXBootup;
 
-			if (!BSX_LoadBIOS() && !is_BSX_BIOS(BIOSROM,BIOS_SIZE))
+			if (BSX_supplied_bios && BSX_supplied_size >= BIOS_SIZE)
+			{
+				/* A shell supplied WITH the pack is the whole point of the
+				 * pairing: the frontend has said which BS-X this pack is being
+				 * read by, so boot it rather than the pack's own programme.
+				 * No core option -- asking twice lets the two answers differ. */
+				memcpy(BIOSROM, BSX_supplied_bios, BIOS_SIZE);
+				BSX.bootup = TRUE;
+			}
+			else if (!BSX_LoadBIOS() && !is_BSX_BIOS(BIOSROM,BIOS_SIZE))
 			{
 				BSX.bootup = FALSE;
 				memset(BIOSROM, 0, BIOS_SIZE);

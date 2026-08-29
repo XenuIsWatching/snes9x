@@ -14,6 +14,7 @@
 #include "display.h"
 #include "conffile.h"
 #include "crosshairs.h"
+#include "bsx.h"
 #include <stdio.h>
 #include <vector>
 #include <string>
@@ -192,8 +193,24 @@ void retro_set_environment(retro_environment_t cb)
         { "Cart B", "smc|sfc|swc|fig|bs", false, false, false, multi_b_memory, 1 },
     };
 
+    /* The BS-X shell paired with an 8M Memory Pack. RETRO_GAME_TYPE_BSX was
+     * already handled in retro_load_game_special but never advertised here, so no
+     * frontend could ask for it -- which left the shell coming from BS-X.bin in
+     * the system directory and nowhere else. Declaring it lets a frontend supply
+     * the shell PER LOAD, which is what makes a translated BS-X usable with a
+     * pack. */
+    static const struct retro_subsystem_memory_info bsx_pack_memory[] = {
+        { "srm", RETRO_MEMORY_SNES_BSX_PRAM },
+    };
+
+    static const struct retro_subsystem_rom_info bsx_roms[] = {
+        { "BS-X Shell", "smc|sfc|swc|fig|bs", false, false, true, NULL, 0 },
+        { "Memory Pack", "bs|smc|sfc", false, false, true, bsx_pack_memory, 1 },
+    };
+
     static const struct retro_subsystem_info subsystems[] = {
         { "Multi-Cart Link", "multicart_addon", multicart_roms, 2, RETRO_GAME_TYPE_MULTI_CART },
+        { "BS-X", "bsx", bsx_roms, 2, RETRO_GAME_TYPE_BSX },
         {}
     };
 
@@ -1220,8 +1237,16 @@ bool retro_load_game_special(unsigned game_type, const struct retro_game_info *i
             }
             else if(num_info == 2)
             {
-                memcpy(Memory.BIOSROM,(const uint8_t*)romptr[0],info[0].size);
+                /* The shell has to be handed to S9xInitBSX rather than copied
+                 * here. LoadROMMem opens with memset(ROM, 0, MAX_ROM_SIZE), and
+                 * BIOSROM is a window into that same buffer (ROM + 0x300000), so
+                 * a copy made before the load is wiped by it -- and S9xInitBSX
+                 * runs INSIDE the load, via InitROM, so a copy made after is too
+                 * late to be seen. The pointer is read during the load and
+                 * cleared on the way out. */
+                S9xSetBSXSuppliedBIOS((const uint8_t*)romptr[0], romsize[0]);
                 rom_loaded = Memory.LoadROMMem((const uint8_t*)romptr[1],info[1].size);
+                S9xSetBSXSuppliedBIOS(NULL, 0);
             }
 
             if (!rom_loaded && log_cb)
