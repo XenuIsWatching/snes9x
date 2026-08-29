@@ -45,6 +45,14 @@ static int g_screen_gun_height = SNES_HEIGHT;
 #define RETRO_MEMORY_SNES_SUFAMI_TURBO_B_RAM ((4 << 8) | RETRO_MEMORY_SAVE_RAM)
 #define RETRO_MEMORY_SNES_GAME_BOY_RAM ((5 << 8) | RETRO_MEMORY_SAVE_RAM)
 #define RETRO_MEMORY_SNES_GAME_BOY_RTC ((6 << 8) | RETRO_MEMORY_RTC)
+/* The 8M Memory Pack: 1 MB of removable flash in the BS-X cartridge's own slot.
+ *
+ * Its own id, because libretro has none for it and the neighbouring one does not
+ * mean this. PRAM above is the cartridge's 512 KB PSRAM (bsx.cpp's PSRAM_SIZE,
+ * Memory.BSRAM) -- a different chip, a different size, and not where a download
+ * is stored. Returning the pack under that name put the right data behind the
+ * wrong label, which works only for as long as nobody implements the real one. */
+#define RETRO_MEMORY_SNES_BSX_PACK ((7 << 8) | RETRO_MEMORY_SAVE_RAM)
 
 #define RETRO_GAME_TYPE_BSX             0x101 | 0x1000
 #define RETRO_GAME_TYPE_BSX_SLOTTED     0x102 | 0x1000
@@ -233,7 +241,7 @@ void retro_set_environment(retro_environment_t cb)
      * the shell PER LOAD, which is what makes a translated BS-X usable with a
      * pack. */
     static const struct retro_subsystem_memory_info bsx_pack_memory[] = {
-        { "srm", RETRO_MEMORY_SNES_BSX_PRAM },
+        { "srm", RETRO_MEMORY_SNES_BSX_PACK },
     };
 
     static const struct retro_subsystem_rom_info bsx_roms[] = {
@@ -1964,7 +1972,7 @@ void* retro_get_memory_data(unsigned type)
          * FlashROM (== Memory.ROM) and is otherwise unreachable: it is in no
          * savestate and no other memory region, so without this a download dies
          * with the process. */
-        case RETRO_MEMORY_SNES_BSX_PRAM:
+        case RETRO_MEMORY_SNES_BSX_PACK:
             data = Settings.BS ? Memory.ROM : NULL;
             break;
         case RETRO_MEMORY_SNES_SUFAMI_TURBO_B_RAM:
@@ -2001,7 +2009,7 @@ size_t retro_get_memory_size(unsigned type)
             if (size > 0x20000)
             size = 0x20000;
             break;
-        case RETRO_MEMORY_SNES_BSX_PRAM:
+        case RETRO_MEMORY_SNES_BSX_PACK:
             size = Settings.BS ? 0x100000 : 0;
             break;
         case RETRO_MEMORY_SNES_SUFAMI_TURBO_B_RAM:
