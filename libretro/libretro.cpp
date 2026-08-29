@@ -15,6 +15,7 @@
 #include "conffile.h"
 #include "crosshairs.h"
 #include "bsx.h"
+#include "bsx.h"
 #include <stdio.h>
 #include <vector>
 #include <string>
@@ -176,6 +177,38 @@ static int pointer_pressed_last_y = 0;
 
 static bool setting_superscope_reverse_buttons = false;
 
+/* --- Satellaview ACCESS lamp ------------------------------------------------
+ * The real unit has two lamps on its front, POWER and ACCESS, and the BS-X
+ * switches the second one through $2194 bit 2 -- it lights while the tuner is
+ * actually moving broadcast data. snes9x already stores that register (bsx.cpp
+ * masks it to the low nibble and keeps it in BSX.PPU), it simply had nowhere to
+ * report it, so a frontend drawing the machine had to guess from its own client
+ * state instead of being told by the hardware.
+ *
+ * RETRO_ENVIRONMENT_GET_LED_INTERFACE is libretro's channel for exactly this.
+ * Only the edges are sent: the register is polled per frame and an unchanged
+ * lamp says nothing.
+ * ---------------------------------------------------------------------------*/
+#define BSX_LED_ACCESS      0
+#define BSX_ACCESS_REGISTER 0x2194
+#define BSX_ACCESS_BIT      0x04
+
+static struct retro_led_interface led_iface = { NULL };
+static int bsx_access_led = -1;
+
+static void bsx_poll_access_led(void)
+{
+    if (!led_iface.set_led_state)
+        return;
+    int on = 0;
+    if (Settings.BS)
+        on = (BSX.PPU[BSX_ACCESS_REGISTER - 0x2180] & BSX_ACCESS_BIT) ? 1 : 0;
+    if (on == bsx_access_led)
+        return;
+    bsx_access_led = on;
+    led_iface.set_led_state(BSX_LED_ACCESS, on);
+}
+
 void retro_set_environment(retro_environment_t cb)
 {
     environ_cb = cb;
@@ -215,6 +248,9 @@ void retro_set_environment(retro_environment_t cb)
     };
 
     cb(RETRO_ENVIRONMENT_SET_SUBSYSTEM_INFO,  (void*)subsystems);
+
+    if (!cb(RETRO_ENVIRONMENT_GET_LED_INTERFACE, &led_iface))
+        led_iface.set_led_state = NULL;
 
     libretro_set_core_options(environ_cb);
 
@@ -1876,6 +1912,7 @@ void retro_run()
     poll_cb();
     report_buttons();
     S9xMainLoop();
+    bsx_poll_access_led();
 }
 
 void retro_deinit()
