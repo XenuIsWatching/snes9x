@@ -1269,6 +1269,18 @@ bool retro_load_game_special(unsigned game_type, const struct retro_game_info *i
         remove_header(romptr[i], romsize[i], true);
     }
 
+    /* The directory the content came from, which only retro_load_game was
+     * setting. Everything S9xGetDirectory does not answer with the system
+     * directory it answers with this one, so left empty by a subsystem load the
+     * paths built from it open with a bare separator and resolve against the root
+     * of the working directory's drive. The BS-X hunts for its satellite stream
+     * there, finds no BSX????-?.bin, and reports that it has no signal; LoadBIOS
+     * loses its chance to find STBIOS.bin beside the cartridges and falls back to
+     * the system directory. The first ROM stands in for the single content here:
+     * it is the cartridge the rest are linked to. */
+    if (num_info > 0 && info[0].path != NULL)
+        extract_directory(g_rom_dir, info[0].path, sizeof(g_rom_dir));
+
     init_descriptors();
     rom_loaded = false;
 
