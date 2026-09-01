@@ -1,0 +1,202 @@
+# Build the retroXR snes9x core for Windows and Android and publish it as a
+# release, so retroXR's CoreDownloadManager can fetch it.
+#
+# This fork carries the Satellaview's 8M Memory Pack, which is what makes a BS-X
+# in retroXR a machine you can download to rather than a shell that pretends.
+# The pack is 1 MB of removable flash and nothing could reach it: there was no
+# memory id for it, it was absent from the savestate, and S9xResetBSX erased it
+# to 0x00 -- where a flash write is an AND, so every write to it was silently
+# discarded and the fixed 0x80 status register reported success anyway.
+#
+# On top of that the `bsx` subsystem is now actually advertised through
+# SET_SUBSYSTEM_INFO, so a frontend can pair a translated shell with a pack (its
+# old two-ROM branch memcpy'd the shell into a window of the ROM buffer that the
+# very next memset wiped); the shell is told when the slot is EMPTY and reports
+# it in its own words; and the ACCESS lamp on the front of the unit is published
+# through RETRO_ENVIRONMENT_GET_LED_INTERFACE.
+#
+# One fix here is not about the Satellaview at all: g_rom_dir was set only in
+# retro_load_game, so anything loaded through retro_load_game_special ran with
+# it empty and every path built from it resolved against a drive root. That is
+# the Sufami Turbo's beside-the-cartridge STBIOS.bin lookup as well as the BS-X's
+# satellite stream.
+#
+#   Windows  snes9x_libretro.dll.zip          containing snes9x_libretro.dll
+#   Android  snes9x_libretro_android.so.zip   containing snes9x_libretro_android.so
+#
+# Windows is cross-compiled from Ubuntu with mingw-w64 rather than built with
+# MSVC, because that is what libretro/Makefile's Windows branch is written for:
+# it wants gcc, -static-libgcc/-static-libstdc++, and the GNU ld version script
+# libretro/link.T, none of which MSVC provides.
+#
+# The release must NOT be a prerelease: the download URL is the /releases/latest/
+# form so shipping a build needs no app update, and GitHub's `latest` skips
+# prereleases. Anything else cut on this fork should be marked prerelease.
+name: retroXR core release
+
+on:
+  push:
+    tags:
+      - 'retroxr-snes9x-libretro-v*'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag or SHA to build'
+        required: true
+        default: 'retroxr'
+      tag:
+        description: 'Release tag to publish as (leave blank to build without publishing)'
+        required: false
+        default: ''
+
+jobs:
+  windows:
+    name: Windows x86_64 (mingw-w64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-mingw-w64-x86-64 make zip
+
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      # platform=win is passed explicitly and never inferred. The makefile picks
+      # its platform from uname, so building for Windows from a Linux host would
+      # otherwise silently produce a unix target.
+      - name: Build
+        run: |
+          cd libretro
+          make platform=win \
+            CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ \
+            -j$(nproc)
+
+      - name: Package
+        run: |
+          mapfile -t hits < <(find . -maxdepth 2 -name 'snes9x_libretro.dll' -type f)
+          if [ "${#hits[@]}" -ne 1 ]; then
+            echo "expected exactly one snes9x_libretro.dll, found ${#hits[@]}:"
+            printf '  %s\n' "${hits[@]}"
+            exit 1
+          fi
+          mkdir -p stage
+          cp "${hits[0]}" stage/snes9x_libretro.dll
+          (cd stage && zip -q -X ../snes9x_libretro.dll.zip snes9x_libretro.dll)
+          file stage/snes9x_libretro.dll
+          ls -lh snes9x_libretro.dll.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: snes9x_libretro.dll.zip
+          if-no-files-found: error
+
+  android:
+    name: Android arm64-v8a
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget unzip zip
+          # Into RUNNER_TEMP, NOT the workspace. This step runs before
+          # actions/checkout, and checkout clears the workspace it checks into --
+          # so an NDK unpacked at $PWD here exists at the end of this step and is
+          # gone by the time the build runs. The failure is a bare
+          # "ndk-build: command not found", which says nothing about why.
+          wget -q -O "$RUNNER_TEMP/ndk.zip" https://dl.google.com/android/repository/android-ndk-r27d-linux.zip
+          unzip -q "$RUNNER_TEMP/ndk.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/android-ndk-r27d" >> $GITHUB_PATH
+
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      # Application.mk says APP_ABI := all; arm64-v8a is passed on the command
+      # line so the run builds the one ABI retroXR ships and not every ABI the
+      # NDK knows.
+      - name: Build
+        run: |
+          cd libretro/jni
+          ndk-build APP_ABI=arm64-v8a -j$(nproc)
+
+      # LOCAL_MODULE is `retro`, so ndk-build emits libretro.so -- a name that
+      # says nothing about which core it is. It is renamed on the way into the
+      # zip to the name the asset advertises and the installer expects.
+      - name: Package
+        run: |
+          # libs/, not obj/. ndk-build leaves an unstripped copy in
+          # obj/local/<abi>/ and INSTALLS the deliverable to libs/<abi>/, so a
+          # search for the bare name finds two and the bigger one is the wrong
+          # one. The exactly-one check below is what turned that into a failed
+          # run rather than a core shipped with its debug info attached.
+          mapfile -t hits < <(find libretro -path '*/libs/arm64-v8a/*' -name 'libretro.so' -type f)
+          if [ "${#hits[@]}" -ne 1 ]; then
+            echo "expected exactly one arm64-v8a libretro.so, found ${#hits[@]}:"
+            printf '  %s\n' "${hits[@]}"
+            exit 1
+          fi
+          mkdir -p stage
+          cp "${hits[0]}" stage/snes9x_libretro_android.so
+          (cd stage && zip -q -X ../snes9x_libretro_android.so.zip snes9x_libretro_android.so)
+          file stage/snes9x_libretro_android.so
+          ls -lh snes9x_libretro_android.so.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: snes9x_libretro_android.so.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: [windows, android]
+    if: github.event_name == 'push' || github.event.inputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          ls -lh dist
+          cat > notes.md <<EOF
+          snes9x libretro core built for retroXR, from \`$GITHUB_SHA\`.
+
+          Windows x86_64 and Android arm64-v8a. The source for these binaries is
+          this tag.
+
+          Over the stock buildbot build this carries the Satellaview's 8M Memory
+          Pack: its own memory id, savestate coverage, and flash erased to 0xFF
+          rather than 0x00 -- which is what a flash write ANDs against, so every
+          download to the pack was previously discarded while the status register
+          reported success. The \`bsx\` subsystem is advertised, so a translated
+          BS-X shell can be paired with a pack; the shell is told when the slot
+          is empty and says so itself; and the front-panel ACCESS lamp is
+          published through the LED interface.
+
+          Also fixes g_rom_dir being empty for every subsystem load, which broke
+          the beside-the-cartridge lookup for both the BS-X satellite stream and
+          the Sufami Turbo's STBIOS.bin.
+          EOF
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "snes9x (retroXR build) $TAG" \
+              --notes-file notes.md
+          fi
+          gh release upload "$TAG" \
+            dist/snes9x_libretro.dll.zip \
+            dist/snes9x_libretro_android.so.zip \
+            --repo "$GITHUB_REPOSITORY" --clobber
